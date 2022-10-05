@@ -1,14 +1,19 @@
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Scanner;
+import java.util.*;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class Main {
     public static void main(String[] args) throws WrongInputException {
         Map map = new Map(true);
         map.print();
+
+        Decider decider = new Decider(map, Scenarios.SPYGLASS);
+        List<Vector<Integer>> path = decider.findPath();
+
+        for (Vector<Integer> pos : path)
+            System.out.println(pos);
     }
 }
 
@@ -17,9 +22,120 @@ class Vector<T> {
     public T x;
     public T y;
 
-    Vector(T x, T y) {
+    public Vector() {
+
+    }
+
+    public Vector(T x, T y) {
         this.x = x;
         this.y = y;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (obj instanceof Vector)
+            return ((Vector<?>) obj).x.equals(x) && ((Vector<?>) obj).y.equals(y);
+        else
+            return false;
+    }
+
+    @Override
+    public String toString() {
+        return "(" + x + ", " + y + ")";
+    }
+}
+
+
+enum Scenarios {
+    SPYGLASS,
+    SUPER_SPYGLASS
+}
+
+
+class Decider {
+    private Vector<Integer> actorPosition;
+    private Map map;
+    private Scenarios scenario;
+
+    public Decider(Map map, Scenarios scenario) {
+        this.map = map;
+        this.scenario = scenario;
+
+        actorPosition = map.getJackPosition();
+    }
+
+    public List<Vector<Integer>> findPath() {
+        switch (this.scenario) {
+            case SPYGLASS:
+                return findPathSpyglass();
+            case SUPER_SPYGLASS:
+                return findPathSuperSpyglass();
+            default:
+                return new ArrayList<>();
+        }
+    }
+
+    private List<Vector<Integer>> findPathSpyglass() {
+        return findPathSpyglassBacktrack(actorPosition, new ArrayList<>());
+    }
+
+    private List<Vector<Integer>> findPathSpyglassBacktrack(Vector<Integer> currentPosition, List<Vector<Integer>> path) {
+        List<Vector<Integer>> newPath = new ArrayList<>(path);              // copy path to a new list
+        newPath.add(currentPosition);                                       // add current position
+
+        if (map.isChestPosition(currentPosition))                           // path found
+            return newPath;
+
+        // list of all neighbor cells
+        List<Vector<Integer>> neighborPositions = new ArrayList<>(
+                List.of(new Vector<>(currentPosition.x - 1, currentPosition.y - 1),
+                        new Vector<>(currentPosition.x, currentPosition.y - 1),
+                        new Vector<>(currentPosition.x + 1, currentPosition.y - 1),
+                        new Vector<>(currentPosition.x - 1, currentPosition.y),
+                        new Vector<>(currentPosition.x + 1, currentPosition.y),
+                        new Vector<>(currentPosition.x - 1, currentPosition.y + 1),
+                        new Vector<>(currentPosition.x, currentPosition.y + 1),
+                        new Vector<>(currentPosition.x + 1, currentPosition.y + 1))
+        );
+
+//        neighborPositions = neighborPositions.stream().filter(
+//                position -> !currentPosition.equals(position)   // delete positions that are already presented in the path
+//        ).filter(
+//                Map::isOnMap                                    // delete positions that are out of bound
+//        ).filter(
+//                position -> !map.isDanger(position)             // delete dangerous positions
+//        ).collect(Collectors.toList());
+        // TODO: fix bug
+        neighborPositions = neighborPositions.stream().filter(position -> !currentPosition.equals(position)).collect(Collectors.toList());
+        neighborPositions = neighborPositions.stream().filter(Map::isOnMap).collect(Collectors.toList());
+        neighborPositions = neighborPositions.stream().filter(position -> !map.isDanger(position)).collect(Collectors.toList());
+
+        // for each neighbor position find path
+        List<List<Vector<Integer>>> pathsObtained = neighborPositions.stream().map(
+                position -> findPathSpyglassBacktrack(position, newPath)
+        ).filter(
+                Objects::nonNull
+        ).collect(Collectors.toList());
+
+        return pathsObtained.stream().min(Comparator.comparingInt(List::size)).orElse(null);
+    }
+
+    private List<Vector<Integer>> findPathSpyglassAStar() {
+        return null;
+    }
+
+    private List<Vector<Integer>> findPathSuperSpyglass() {
+        List<Vector<Integer>> result = new ArrayList<>();
+
+        return result;
+    }
+
+    private List<Vector<Integer>> findPathSuperSpyglassBacktrack() {
+        return null;
+    }
+
+    private List<Vector<Integer>> findPathSuperSpyglassAStar() {
+        return null;
     }
 }
 
@@ -28,13 +144,9 @@ class Map {
     private final List<List<Entity>> map;
     private static final Vector<Integer> size = new Vector<>(9, 9);
     private List<Entity> entities;
-
-
-    enum Scenarios {
-        SPYGLASS,
-        SUPER_SPYGLASS
-    }
-
+    private List<Attacker> attackers;
+    private JackSparrow jack;
+    private DeadMansChest chest;
     private Scenarios scenario;
 
     private Map() {
@@ -47,6 +159,8 @@ class Map {
 
             map.add(line);
         }
+        entities = new ArrayList<>();
+        attackers = new ArrayList<>();
     }
 
     public Map(boolean readFromFile) throws WrongInputException {
@@ -99,16 +213,23 @@ class Map {
         if (splittedRow.length != 6)
             throw new WrongInputException();
 
+        jack = new JackSparrow();
+        DavyJones davy = new DavyJones();
+        Kraken kraken = new Kraken();
+        Rock rock = new Rock();
+        chest = new DeadMansChest();
+        Tortuga tortuga = new Tortuga();
+
         entities = new ArrayList<>(List.of(
-                new Entity[]{
-                        new JackSparrow(),
-                        new DavyJones(),
-                        new Kraken(),
-                        new Rock(),
-                        new DeadMansChest(),
-                        new Tortuga()
-                }
+                jack,
+                davy,
+                kraken,
+                rock,
+                chest,
+                tortuga
         ));
+
+        attackers.addAll(List.of(davy, kraken, rock));
 
         String[] splitted;
         int x, y;
@@ -122,8 +243,7 @@ class Map {
             if (!isOnMap(x, y))
                 throw new WrongInputException();
 
-            entities.get(i).setX(x);
-            entities.get(i).setY(y);
+            entities.get(i).setPosition(new Vector<>(x, y));
 
             setCell(x, y, entities.get(i));
         }
@@ -161,6 +281,29 @@ class Map {
 
     public void setCell(Vector<Integer> vector, Entity entity) {
         setCell(vector.x, vector.y, entity);
+    }
+
+    public boolean isDanger(int x, int y) {
+        for (Attacker attacker : attackers)
+            if (attacker.isAttacking(x, y))
+                return true;
+        return false;
+    }
+
+    public boolean isDanger(Vector<Integer> position) {
+        return isDanger(position.x, position.y);
+    }
+
+    public boolean isChestPosition(int x, int y) {
+        return chest.getX() == x && chest.getY() == y;
+    }
+
+    public boolean isChestPosition(Vector<Integer> position) {
+        return chest.getPosition().equals(position);
+    }
+
+    public Vector<Integer> getJackPosition() {
+        return jack.getPosition();
     }
 
     public void print() {
@@ -215,12 +358,19 @@ interface Entity {
 }
 
 interface Attacker {
-    public abstract List<Vector<Integer>> getAttackRange();
+    public List<Vector<Integer>> getAttackRange();
+    public boolean isAttacking(int x, int y);
+    public boolean isNeutralized();
+    public void neutralize();
 }
 
 
 class JackSparrow implements Entity {
     private Vector<Integer> position;
+
+    public JackSparrow() {
+        position = new Vector<>();
+    }
 
     public int getX() {
         return position.x;
@@ -244,15 +394,6 @@ class JackSparrow implements Entity {
 
     public void setPosition(Vector<Integer> position) {
         this.position = position;
-    }
-
-    public List<Vector<Integer>> getAttackRange() {
-        List<Vector<Integer>> attackRange = new ArrayList<>(8);
-        for (int i = position.x - 1; i <= position.x + 1; ++i) {
-            for (int j = position.y - 1; j <= position.y + 1; ++j)
-                attackRange.add(new Vector<>(i, j));
-        }
-        return attackRange;
     }
 }
 
@@ -260,6 +401,10 @@ class JackSparrow implements Entity {
 class DavyJones implements Entity, Attacker {
     private Vector<Integer> position;
 
+    public DavyJones() {
+        position = new Vector<>();
+    }
+
     public int getX() {
         return position.x;
     }
@@ -292,11 +437,31 @@ class DavyJones implements Entity, Attacker {
         }
         return attackRange;
     }
+
+    @Override
+    public boolean isAttacking(int x, int y) {
+        return Math.abs(x - this.position.x) == 1 && Math.abs(y - this.position.y) == 1;
+    }
+
+    @Override
+    public boolean isNeutralized() {
+        return false;
+    }
+
+    @Override
+    public void neutralize() {
+
+    }
 }
 
 
 class Kraken implements Entity, Attacker {
     private Vector<Integer> position;
+    private boolean isNeutralized = false;
+
+    public Kraken() {
+        position = new Vector<>();
+    }
 
     public int getX() {
         return position.x;
@@ -324,12 +489,34 @@ class Kraken implements Entity, Attacker {
 
     @Override
     public List<Vector<Integer>> getAttackRange() {
-        return new ArrayList<>(List.of(
-                new Vector<>(position.x - 1, position.y),
-                new Vector<>(position.x + 1, position.y),
-                new Vector<>(position.x, position.y - 1),
-                new Vector<>(position.x, position.y + 1)
-        ));
+        if (isNeutralized)
+            return new ArrayList<>();
+        else
+            return new ArrayList<>(List.of(
+                    new Vector<>(position.x - 1, position.y),
+                    new Vector<>(position.x + 1, position.y),
+                    new Vector<>(position.x, position.y - 1),
+                    new Vector<>(position.x, position.y + 1)
+            ));
+    }
+
+    @Override
+    public boolean isAttacking(int x, int y) {
+        System.out.println("my pos: " + position);
+        boolean res = Math.abs(x - position.x) == 1 && y == position.y
+                || Math.abs(y - position.y) == 1 && x == position.x;
+        System.out.println("position " + x + " " + y + " is attacked: " + res);
+        return res;
+    }
+
+    @Override
+    public boolean isNeutralized() {
+        return isNeutralized;
+    }
+
+    @Override
+    public void neutralize() {
+        isNeutralized = true;
     }
 }
 
@@ -337,6 +524,10 @@ class Kraken implements Entity, Attacker {
 class Rock implements Entity, Attacker {
     private Vector<Integer> position;
 
+    public Rock() {
+        position = new Vector<>();
+    }
+
     public int getX() {
         return position.x;
     }
@@ -363,13 +554,32 @@ class Rock implements Entity, Attacker {
 
     @Override
     public List<Vector<Integer>> getAttackRange() {
-        return null;
+        return new ArrayList<>(List.of(position));
+    }
+
+    @Override
+    public boolean isAttacking(int x, int y) {
+        return position.x == x && position.y == y;
+    }
+
+    @Override
+    public boolean isNeutralized() {
+        return false;
+    }
+
+    @Override
+    public void neutralize() {
+
     }
 }
 
 
 class DeadMansChest implements Entity {
     private Vector<Integer> position;
+
+    public DeadMansChest() {
+        position = new Vector<>();
+    }
 
     public int getX() {
         return position.x;
@@ -399,6 +609,10 @@ class DeadMansChest implements Entity {
 
 class Tortuga implements Entity {
     private Vector<Integer> position;
+
+    public Tortuga() {
+        position = new Vector<>();
+    }
 
     public int getX() {
         return position.x;
