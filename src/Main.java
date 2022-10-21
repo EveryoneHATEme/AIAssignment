@@ -10,15 +10,20 @@ public class Main {
         map.print();
 
         Decider decider = new Decider(map, Scenarios.SPYGLASS);
-        List<Vector<Integer>> path = decider.findPath();
+        Path path = decider.findPath();
 
-        for (Vector<Integer> pos : path)
+        for (Vector<Integer> pos : path.getPositions())
             System.out.println(pos);
     }
 }
 
 
 class Vector<T> {
+    /*
+    * Defines a container for two values
+    * Used in code to store positions of entities on a map
+    * The fields x and y are public and have no getters and setters, because it is sufficient for just storing some values
+    * */
     public T x;
     public T y;
 
@@ -46,6 +51,66 @@ class Vector<T> {
 }
 
 
+class Path {
+    private final List<Vector<Integer>> positions;
+    private boolean rumPicked;
+
+    public Path() {
+        positions = new ArrayList<>();
+        rumPicked = false;
+    }
+
+    public Path(Path oldPath) {
+        positions = new ArrayList<>(oldPath.getPositions());
+        rumPicked = oldPath.isRumPicked();
+    }
+
+    public List<Vector<Integer>> getPositions() {
+        return positions;
+    }
+
+    public void addPosition(Vector<Integer> position) {
+        positions.add(position);
+    }
+
+    public void addPositionToBeginning(Vector<Integer> position) {
+        positions.add(0, position);
+    }
+
+    public void extend(Path otherPath) {
+        for (Vector<Integer> position : otherPath.positions)
+            addPosition(position);
+    }
+
+    public boolean isRumPicked() {
+        return rumPicked;
+    }
+
+    public void setRumPicked(boolean picked) {
+        rumPicked = picked;
+    }
+
+    public int size() {
+        return positions.size();
+    }
+
+    public boolean contains(Vector<Integer> position) {
+        for (Vector<Integer> pathPosition : positions)
+            if (position.equals(pathPosition))
+                return true;
+        return false;
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder res = new StringBuilder();
+        for (Vector<Integer> pos : positions)
+            res.append(pos.toString());
+        return res.toString();
+    }
+}
+
+
 enum Scenarios {
     SPYGLASS,
     SUPER_SPYGLASS
@@ -53,9 +118,9 @@ enum Scenarios {
 
 
 class Decider {
-    private Vector<Integer> actorPosition;
-    private Map map;
-    private Scenarios scenario;
+    private final Vector<Integer> actorPosition;
+    private final Map map;
+    private final Scenarios scenario;
 
     public Decider(Map map, Scenarios scenario) {
         this.map = map;
@@ -64,77 +129,126 @@ class Decider {
         actorPosition = map.getJackPosition();
     }
 
-    public List<Vector<Integer>> findPath() {
+    public Path findPath() {
         switch (this.scenario) {
             case SPYGLASS:
                 return findPathSpyglass();
             case SUPER_SPYGLASS:
                 return findPathSuperSpyglass();
             default:
-                return new ArrayList<>();
+                return new Path();
         }
     }
 
-    private List<Vector<Integer>> findPathSpyglass() {
-        return findPathSpyglassBacktrack(actorPosition, new ArrayList<>());
+    private Path findPathSpyglass() {
+        int[][] pathLengthMatrix = Utils.createMatrix(Map.getSize().x, Map.getSize().y, -1);
+
+        findPathSpyglassBacktrack(actorPosition, 0, pathLengthMatrix, false, false);
+
+        Vector<Integer> chestPosition = map.getChestPosition();
+        Vector<Integer> tortugaPosition = map.getTortugaPosition();
+        Path pathToChest = new Path();
+
+        if (pathLengthMatrix[chestPosition.x][chestPosition.y] != -1) {
+            pathToChest = getPathAfterBacktracking(map.getJackPosition(), chestPosition, pathLengthMatrix);
+        } else if (pathLengthMatrix[tortugaPosition.x][tortugaPosition.y] != -1) {
+            pathToChest = getPathAfterBacktracking(map.getJackPosition(), tortugaPosition, pathLengthMatrix);
+
+            pathLengthMatrix = Utils.createMatrix(Map.getSize().x, Map.getSize().y, -1);
+
+            findPathSpyglassBacktrack(tortugaPosition, 0, pathLengthMatrix, true, false);
+            if (pathLengthMatrix[chestPosition.x][chestPosition.y] == -1)
+                return new Path();
+            Path pathFromTortugaToChest = getPathAfterBacktracking(tortugaPosition, chestPosition, pathLengthMatrix);
+            pathToChest.extend(pathFromTortugaToChest);
+        }
+
+        return pathToChest;
     }
 
-    private List<Vector<Integer>> findPathSpyglassBacktrack(Vector<Integer> currentPosition, List<Vector<Integer>> path) {
-        List<Vector<Integer>> newPath = new ArrayList<>(path);              // copy path to a new list
-        newPath.add(currentPosition);                                       // add current position
+    private void findPathSpyglassBacktrack(Vector<Integer> currentPosition, int currentPathLength, int[][] pathLengthMatrix, boolean rumPicked, boolean krakenKilled) {
+        if (pathLengthMatrix[currentPosition.x][currentPosition.y] > currentPathLength || pathLengthMatrix[currentPosition.x][currentPosition.y] == -1)
+            pathLengthMatrix[currentPosition.x][currentPosition.y] = currentPathLength;
+        else
+            return;
 
-        if (map.isChestPosition(currentPosition))                           // path found
-            return newPath;
-
-        // list of all neighbor cells
-        List<Vector<Integer>> neighborPositions = new ArrayList<>(
-                List.of(new Vector<>(currentPosition.x - 1, currentPosition.y - 1),
-                        new Vector<>(currentPosition.x, currentPosition.y - 1),
-                        new Vector<>(currentPosition.x + 1, currentPosition.y - 1),
-                        new Vector<>(currentPosition.x - 1, currentPosition.y),
-                        new Vector<>(currentPosition.x + 1, currentPosition.y),
-                        new Vector<>(currentPosition.x - 1, currentPosition.y + 1),
-                        new Vector<>(currentPosition.x, currentPosition.y + 1),
-                        new Vector<>(currentPosition.x + 1, currentPosition.y + 1))
+        List<Vector<Integer>> neighborCells = List.of(
+                new Vector<>(currentPosition.x - 1, currentPosition.y - 1),
+                new Vector<>(currentPosition.x, currentPosition.y - 1),
+                new Vector<>(currentPosition.x + 1, currentPosition.y - 1),
+                new Vector<>(currentPosition.x - 1, currentPosition.y),
+                new Vector<>(currentPosition.x + 1, currentPosition.y),
+                new Vector<>(currentPosition.x - 1, currentPosition.y + 1),
+                new Vector<>(currentPosition.x, currentPosition.y + 1),
+                new Vector<>(currentPosition.x + 1, currentPosition.y + 1)
         );
 
-//        neighborPositions = neighborPositions.stream().filter(
-//                position -> !currentPosition.equals(position)   // delete positions that are already presented in the path
-//        ).filter(
-//                Map::isOnMap                                    // delete positions that are out of bound
-//        ).filter(
-//                position -> !map.isDanger(position)             // delete dangerous positions
-//        ).collect(Collectors.toList());
-        // TODO: fix bug
-        neighborPositions = neighborPositions.stream().filter(position -> !currentPosition.equals(position)).collect(Collectors.toList());
-        neighborPositions = neighborPositions.stream().filter(Map::isOnMap).collect(Collectors.toList());
-        neighborPositions = neighborPositions.stream().filter(position -> !map.isDanger(position)).collect(Collectors.toList());
+        List<Vector<Integer>> filteredNeighborCells = new ArrayList<>();
+        for (Vector<Integer> cell : neighborCells) {
+            if (!Map.isOnMap(cell))
+                continue;
 
-        // for each neighbor position find path
-        List<List<Vector<Integer>>> pathsObtained = neighborPositions.stream().map(
-                position -> findPathSpyglassBacktrack(position, newPath)
-        ).filter(
-                Objects::nonNull
-        ).collect(Collectors.toList());
+            if (map.isDanger(currentPosition, krakenKilled))
+                continue;
 
-        return pathsObtained.stream().min(Comparator.comparingInt(List::size)).orElse(null);
+            if (pathLengthMatrix[cell.x][cell.y] <= currentPathLength && pathLengthMatrix[cell.x][cell.y] != -1)
+                continue;
+
+            filteredNeighborCells.add(cell);
+        }
+
+        for (Vector<Integer> cell : filteredNeighborCells) {
+            if (rumPicked && map.isKrakenPosition(cell))
+                findPathSpyglassBacktrack(cell, currentPathLength + 1, pathLengthMatrix, true, true);
+            else
+                findPathSpyglassBacktrack(cell, currentPathLength + 1, pathLengthMatrix, rumPicked, krakenKilled);
+        }
     }
 
-    private List<Vector<Integer>> findPathSpyglassAStar() {
+    private Path getPathAfterBacktracking(Vector<Integer> from, Vector<Integer> target, int[][] minLengthMatrix) {
+        Vector<Integer> currentPosition = target;
+        Path pathToTarget = new Path();
+        boolean nextStep = false;
+        while (!currentPosition.equals(from)) {
+            for (int i = currentPosition.x - 1; i <= currentPosition.x + 1; ++i) {
+                for (int j = currentPosition.y - 1; j <= currentPosition.y + 1; ++j) {
+                    if (i == currentPosition.x && j == currentPosition.y)
+                        continue;
+
+                    if (!Map.isOnMap(i, j))
+                        continue;
+
+                    if (minLengthMatrix[i][j] == minLengthMatrix[currentPosition.x][currentPosition.y] - 1) {
+                        pathToTarget.addPositionToBeginning(currentPosition);
+                        currentPosition = new Vector<>(i, j);
+                        nextStep = true;
+                    }
+
+                    if (nextStep)
+                        break;
+                }
+                if (nextStep)
+                    break;
+            }
+            nextStep = false;
+        }
+
+        return pathToTarget;
+    }
+
+    private Path findPathSpyglassAStar() {
         return null;
     }
 
-    private List<Vector<Integer>> findPathSuperSpyglass() {
-        List<Vector<Integer>> result = new ArrayList<>();
-
-        return result;
+    private Path findPathSuperSpyglass() {
+        return findPathSpyglass();
     }
 
-    private List<Vector<Integer>> findPathSuperSpyglassBacktrack() {
+    private Path findPathSuperSpyglassBacktrack() {
         return null;
     }
 
-    private List<Vector<Integer>> findPathSuperSpyglassAStar() {
+    private Path findPathSuperSpyglassAStar() {
         return null;
     }
 }
@@ -144,9 +258,11 @@ class Map {
     private final List<List<Entity>> map;
     private static final Vector<Integer> size = new Vector<>(9, 9);
     private List<Entity> entities;
-    private List<Attacker> attackers;
+    private final List<Attacker> attackers;
     private JackSparrow jack;
     private DeadMansChest chest;
+    private Tortuga tortuga;
+    private Kraken kraken;
     private Scenarios scenario;
 
     private Map() {
@@ -215,10 +331,10 @@ class Map {
 
         jack = new JackSparrow();
         DavyJones davy = new DavyJones();
-        Kraken kraken = new Kraken();
+        kraken = new Kraken();
         Rock rock = new Rock();
         chest = new DeadMansChest();
-        Tortuga tortuga = new Tortuga();
+        tortuga = new Tortuga();
 
         entities = new ArrayList<>(List.of(
                 jack,
@@ -259,6 +375,10 @@ class Map {
         }
     }
 
+    public static Vector<Integer> getSize() {
+        return size;
+    }
+
     public Entity getCell(int x, int y) {
         if (!isOnMap(x, y))
             return null;
@@ -283,15 +403,23 @@ class Map {
         setCell(vector.x, vector.y, entity);
     }
 
-    public boolean isDanger(int x, int y) {
+    public boolean isDanger(int x, int y, boolean krakenKilled) {
         for (Attacker attacker : attackers)
-            if (attacker.isAttacking(x, y))
+            if (attacker.isAttacking(x, y) && !(attacker instanceof Kraken && krakenKilled))
                 return true;
         return false;
     }
 
-    public boolean isDanger(Vector<Integer> position) {
-        return isDanger(position.x, position.y);
+    public boolean isDanger(Vector<Integer> position, boolean rumPicked) {
+        return isDanger(position.x, position.y, rumPicked);
+    }
+
+    public Vector<Integer> getChestPosition() {
+        return chest.getPosition();
+    }
+
+    public boolean isKrakenPosition(Vector<Integer> position) {
+        return position.equals(kraken.getPosition());
     }
 
     public boolean isChestPosition(int x, int y) {
@@ -300,6 +428,18 @@ class Map {
 
     public boolean isChestPosition(Vector<Integer> position) {
         return chest.getPosition().equals(position);
+    }
+
+    public Vector<Integer> getTortugaPosition() {
+        return tortuga.getPosition();
+    }
+
+    public boolean isTortugaPosition(int x, int y) {
+        return tortuga.getX() == x && tortuga.getY() == y;
+    }
+
+    public boolean isTortugaPosition(Vector<Integer> position) {
+        return tortuga.getPosition().equals(position);
     }
 
     public Vector<Integer> getJackPosition() {
@@ -325,6 +465,8 @@ class Map {
                     System.out.print('X');
                 else if (currentCell instanceof Tortuga)
                     System.out.print('T');
+                else if (isDanger(j, i, false))
+                    System.out.print('#');
                 else
                     System.out.print('_');
             }
@@ -360,6 +502,7 @@ interface Entity {
 interface Attacker {
     public List<Vector<Integer>> getAttackRange();
     public boolean isAttacking(int x, int y);
+    public boolean canBeNeutralized(int x, int y);
     public boolean isNeutralized();
     public void neutralize();
 }
@@ -440,7 +583,14 @@ class DavyJones implements Entity, Attacker {
 
     @Override
     public boolean isAttacking(int x, int y) {
-        return Math.abs(x - this.position.x) == 1 && Math.abs(y - this.position.y) == 1;
+        for (Vector<Integer> position : getAttackRange())
+            if (position.x == x && position.y == y)
+                return true;
+        return false;
+    }
+
+    public boolean canBeNeutralized(int x, int y) {
+        return false;
     }
 
     @Override
@@ -493,6 +643,7 @@ class Kraken implements Entity, Attacker {
             return new ArrayList<>();
         else
             return new ArrayList<>(List.of(
+                    new Vector<>(position.x, position.y),
                     new Vector<>(position.x - 1, position.y),
                     new Vector<>(position.x + 1, position.y),
                     new Vector<>(position.x, position.y - 1),
@@ -502,11 +653,12 @@ class Kraken implements Entity, Attacker {
 
     @Override
     public boolean isAttacking(int x, int y) {
-        System.out.println("my pos: " + position);
-        boolean res = Math.abs(x - position.x) == 1 && y == position.y
-                || Math.abs(y - position.y) == 1 && x == position.x;
-        System.out.println("position " + x + " " + y + " is attacked: " + res);
-        return res;
+        return Math.abs(x - position.x) <= 1 && y == position.y
+                || Math.abs(y - position.y) <= 1 && x == position.x;
+    }
+
+    public boolean canBeNeutralized(int x, int y) {
+        return (position.y - 1 == y || position.y + 1 == y) && (position.x - 1 == x || position.x + 1 == x);
     }
 
     @Override
@@ -560,6 +712,11 @@ class Rock implements Entity, Attacker {
     @Override
     public boolean isAttacking(int x, int y) {
         return position.x == x && position.y == y;
+    }
+
+
+    public boolean canBeNeutralized(int x, int y) {
+        return false;
     }
 
     @Override
@@ -636,6 +793,28 @@ class Tortuga implements Entity {
 
     public void setPosition(Vector<Integer> position) {
         this.position = position;
+    }
+}
+
+
+class Utils {
+    public static int[][] createMatrix(int sizeX, int sizeY, int defaultValue) {
+        int[][] matrix = new int[sizeX][sizeY];
+
+        for (int i = 0; i < sizeX; ++i)
+            for (int j = 0; j < sizeY; ++j)
+                matrix[i][j] = defaultValue;
+
+        return matrix;
+    }
+
+    public static void printMatrix(int[][] matrix) {
+        for (int i = 0; i < matrix[0].length; ++i) {
+            for (int[] line : matrix)
+                System.out.print(line[i] + "\t");
+            System.out.println();
+        }
+        System.out.println();
     }
 }
 
