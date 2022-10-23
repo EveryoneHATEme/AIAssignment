@@ -1,112 +1,15 @@
-import java.io.File;
-import java.io.FileNotFoundException;
+import java.io.*;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class Main {
     public static void main(String[] args) throws WrongInputException {
-        Map map = new Map(true);
-        map.print();
+        EnvironmentMap environmentMap = new EnvironmentMap(true);
+        System.out.println(environmentMap.getString());
 
-        Decider decider = new Decider(map, Scenarios.SPYGLASS);
-        Path path = decider.findPath();
-
-        for (Vector<Integer> pos : path.getPositions())
-            System.out.println(pos);
-    }
-}
-
-
-class Vector<T> {
-    /*
-    * Defines a container for two values
-    * Used in code to store positions of entities on a map
-    * The fields x and y are public and have no getters and setters, because it is sufficient for just storing some values
-    * */
-    public T x;
-    public T y;
-
-    public Vector() {
-
-    }
-
-    public Vector(T x, T y) {
-        this.x = x;
-        this.y = y;
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-        if (obj instanceof Vector)
-            return ((Vector<?>) obj).x.equals(x) && ((Vector<?>) obj).y.equals(y);
-        else
-            return false;
-    }
-
-    @Override
-    public String toString() {
-        return "(" + x + ", " + y + ")";
-    }
-}
-
-
-class Path {
-    private final List<Vector<Integer>> positions;
-    private boolean rumPicked;
-
-    public Path() {
-        positions = new ArrayList<>();
-        rumPicked = false;
-    }
-
-    public Path(Path oldPath) {
-        positions = new ArrayList<>(oldPath.getPositions());
-        rumPicked = oldPath.isRumPicked();
-    }
-
-    public List<Vector<Integer>> getPositions() {
-        return positions;
-    }
-
-    public void addPosition(Vector<Integer> position) {
-        positions.add(position);
-    }
-
-    public void addPositionToBeginning(Vector<Integer> position) {
-        positions.add(0, position);
-    }
-
-    public void extend(Path otherPath) {
-        for (Vector<Integer> position : otherPath.positions)
-            addPosition(position);
-    }
-
-    public boolean isRumPicked() {
-        return rumPicked;
-    }
-
-    public void setRumPicked(boolean picked) {
-        rumPicked = picked;
-    }
-
-    public int size() {
-        return positions.size();
-    }
-
-    public boolean contains(Vector<Integer> position) {
-        for (Vector<Integer> pathPosition : positions)
-            if (position.equals(pathPosition))
-                return true;
-        return false;
-    }
-
-    @Override
-    public String toString() {
-        StringBuilder res = new StringBuilder();
-        for (Vector<Integer> pos : positions)
-            res.append(pos.toString());
-        return res.toString();
+        Decider decider = new Decider(environmentMap);
+        decider.findPath();
     }
 }
 
@@ -118,95 +21,120 @@ enum Scenarios {
 
 
 class Decider {
-    private final Vector<Integer> actorPosition;
-    private final Map map;
-    private final Scenarios scenario;
+    private final EnvironmentMap environmentMap;
 
-    public Decider(Map map, Scenarios scenario) {
-        this.map = map;
-        this.scenario = scenario;
-
-        actorPosition = map.getJackPosition();
+    public Decider(EnvironmentMap environmentMap) {
+        this.environmentMap = environmentMap;
     }
 
-    public Path findPath() {
-        switch (this.scenario) {
-            case SPYGLASS:
-                return findPathSpyglass();
+    public void findPath(String outputFileNameBacktracking, String outputFileNameAStar) {
+        Path backtrackingResult = new Path(), aStarResult = new Path();
+        long backtrackingStartTime, backtrackingTimeTaken = 0, aStarStartTime, aStarTimeTaken = 0;
+        switch (environmentMap.getScenario()) {
             case SUPER_SPYGLASS:
-                return findPathSuperSpyglass();
-            default:
-                return new Path();
+            case SPYGLASS:
+                backtrackingStartTime = System.nanoTime();
+                backtrackingResult = findPathSpyglassBacktrack();
+                backtrackingTimeTaken = (System.nanoTime() - backtrackingStartTime) / 1000000;
+                aStarStartTime = System.nanoTime();
+                aStarResult = findPathSpyglassAStarHead();
+                aStarTimeTaken = (System.nanoTime() - aStarStartTime) / 1000000;
+        }
+
+        boolean winBacktracking = backtrackingResult.size() != 0;
+        printToFile(winBacktracking, backtrackingResult, backtrackingTimeTaken, outputFileNameBacktracking);
+
+        boolean winAStar = aStarResult.size() != 0;
+        printToFile(winAStar, aStarResult, aStarTimeTaken, outputFileNameAStar);
+    }
+
+    public void findPath() {
+        findPath("outputBacktracking.txt", "outputAStar.txt");
+    }
+
+    public void printToFile(boolean win, Path path, long timeTaken, String filename) {
+        try {
+            BufferedWriter writer = new BufferedWriter(new FileWriter(filename));
+
+            if (!win) {
+                writer.write("Lose\n");
+            } else {
+                writer.write("Win\n");
+                writer.append(String.valueOf(path.size())).append('\n');
+                writer.append(path.toString()).append('\n');
+                writer.append(environmentMap.getString(path));
+                writer.append(String.valueOf(timeTaken)).append("ms\n");
+            }
+            writer.close();
+        } catch (IOException exception) {
+            System.out.println("Cannot open the file " + filename);
         }
     }
 
-    private Path findPathSpyglass() {
-        int[][] pathLengthMatrix = Utils.createMatrix(Map.getSize().x, Map.getSize().y, -1);
+    private Path findPathSpyglassBacktrack() {
+        int[][] pathLengthMatrix = Utils.createMatrix(EnvironmentMap.getSize().x, EnvironmentMap.getSize().y, -1);
 
-        findPathSpyglassBacktrack(actorPosition, 0, pathLengthMatrix, false, false);
+        findPathSpyglassBacktrackRecursion(environmentMap.getJackPosition(), 0, pathLengthMatrix, false, false);
 
-        Vector<Integer> chestPosition = map.getChestPosition();
-        Vector<Integer> tortugaPosition = map.getTortugaPosition();
+        Position chestPosition = environmentMap.getChestPosition();
+        Position tortugaPosition = environmentMap.getTortugaPosition();
         Path pathToChest = new Path();
 
         if (pathLengthMatrix[chestPosition.x][chestPosition.y] != -1) {
-            pathToChest = getPathAfterBacktracking(map.getJackPosition(), chestPosition, pathLengthMatrix);
+            pathToChest = getPathAfterSearching(environmentMap.getJackPosition(), chestPosition, pathLengthMatrix);
         } else if (pathLengthMatrix[tortugaPosition.x][tortugaPosition.y] != -1) {
-            pathToChest = getPathAfterBacktracking(map.getJackPosition(), tortugaPosition, pathLengthMatrix);
+            pathToChest = getPathAfterSearching(environmentMap.getJackPosition(), tortugaPosition, pathLengthMatrix);
 
-            pathLengthMatrix = Utils.createMatrix(Map.getSize().x, Map.getSize().y, -1);
+            pathLengthMatrix = Utils.createMatrix(EnvironmentMap.getSize().x, EnvironmentMap.getSize().y, -1);
 
-            findPathSpyglassBacktrack(tortugaPosition, 0, pathLengthMatrix, true, false);
+            findPathSpyglassBacktrackRecursion(tortugaPosition, 0, pathLengthMatrix, true, false);
             if (pathLengthMatrix[chestPosition.x][chestPosition.y] == -1)
                 return new Path();
-            Path pathFromTortugaToChest = getPathAfterBacktracking(tortugaPosition, chestPosition, pathLengthMatrix);
+            Path pathFromTortugaToChest = getPathAfterSearching(tortugaPosition, chestPosition, pathLengthMatrix);
             pathToChest.extend(pathFromTortugaToChest);
         }
 
         return pathToChest;
     }
 
-    private void findPathSpyglassBacktrack(Vector<Integer> currentPosition, int currentPathLength, int[][] pathLengthMatrix, boolean rumPicked, boolean krakenKilled) {
+    private void findPathSpyglassBacktrackRecursion(Position currentPosition, int currentPathLength, int[][] pathLengthMatrix, boolean rumPicked, boolean krakenKilled) {
         if (pathLengthMatrix[currentPosition.x][currentPosition.y] > currentPathLength || pathLengthMatrix[currentPosition.x][currentPosition.y] == -1)
             pathLengthMatrix[currentPosition.x][currentPosition.y] = currentPathLength;
         else
             return;
 
-        List<Vector<Integer>> neighborCells = List.of(
-                new Vector<>(currentPosition.x - 1, currentPosition.y - 1),
-                new Vector<>(currentPosition.x, currentPosition.y - 1),
-                new Vector<>(currentPosition.x + 1, currentPosition.y - 1),
-                new Vector<>(currentPosition.x - 1, currentPosition.y),
-                new Vector<>(currentPosition.x + 1, currentPosition.y),
-                new Vector<>(currentPosition.x - 1, currentPosition.y + 1),
-                new Vector<>(currentPosition.x, currentPosition.y + 1),
-                new Vector<>(currentPosition.x + 1, currentPosition.y + 1)
+        List<Position> neighborCells = List.of(
+                new Position(currentPosition.x - 1, currentPosition.y - 1),
+                new Position(currentPosition.x, currentPosition.y - 1),
+                new Position(currentPosition.x + 1, currentPosition.y - 1),
+                new Position(currentPosition.x - 1, currentPosition.y),
+                new Position(currentPosition.x + 1, currentPosition.y),
+                new Position(currentPosition.x - 1, currentPosition.y + 1),
+                new Position(currentPosition.x, currentPosition.y + 1),
+                new Position(currentPosition.x + 1, currentPosition.y + 1)
         );
 
-        List<Vector<Integer>> filteredNeighborCells = new ArrayList<>();
-        for (Vector<Integer> cell : neighborCells) {
-            if (!Map.isOnMap(cell))
-                continue;
+        neighborCells = neighborCells.stream().filter(EnvironmentMap::isOnMap).collect(Collectors.toList());
 
-            if (map.isDanger(currentPosition, krakenKilled))
-                continue;
+        if (rumPicked)
+            for (Position cell : neighborCells)
+                if (environmentMap.isKrakenPosition(cell)) {
+                    krakenKilled = true;
+                    break;
+                }
 
-            if (pathLengthMatrix[cell.x][cell.y] <= currentPathLength && pathLengthMatrix[cell.x][cell.y] != -1)
-                continue;
+        boolean finalKrakenKilled = krakenKilled;
+        neighborCells = neighborCells.stream().filter(cell -> !environmentMap.isDanger(cell, finalKrakenKilled))
+                .filter(cell -> !(pathLengthMatrix[cell.x][cell.y] <= currentPathLength && pathLengthMatrix[cell.x][cell.y] != -1))
+                .collect(Collectors.toList());
 
-            filteredNeighborCells.add(cell);
-        }
-
-        for (Vector<Integer> cell : filteredNeighborCells) {
-            if (rumPicked && map.isKrakenPosition(cell))
-                findPathSpyglassBacktrack(cell, currentPathLength + 1, pathLengthMatrix, true, true);
-            else
-                findPathSpyglassBacktrack(cell, currentPathLength + 1, pathLengthMatrix, rumPicked, krakenKilled);
+        for (Position cell : neighborCells) {
+            findPathSpyglassBacktrackRecursion(cell, currentPathLength + 1, pathLengthMatrix, rumPicked, krakenKilled);
         }
     }
 
-    private Path getPathAfterBacktracking(Vector<Integer> from, Vector<Integer> target, int[][] minLengthMatrix) {
-        Vector<Integer> currentPosition = target;
+    private Path getPathAfterSearching(Position from, Position target, int[][] minLengthMatrix) {
+        Position currentPosition = target;
         Path pathToTarget = new Path();
         boolean nextStep = false;
         while (!currentPosition.equals(from)) {
@@ -215,12 +143,12 @@ class Decider {
                     if (i == currentPosition.x && j == currentPosition.y)
                         continue;
 
-                    if (!Map.isOnMap(i, j))
+                    if (!EnvironmentMap.isOnMap(i, j))
                         continue;
 
                     if (minLengthMatrix[i][j] == minLengthMatrix[currentPosition.x][currentPosition.y] - 1) {
                         pathToTarget.addPositionToBeginning(currentPosition);
-                        currentPosition = new Vector<>(i, j);
+                        currentPosition = new Position(i, j);
                         nextStep = true;
                     }
 
@@ -236,12 +164,93 @@ class Decider {
         return pathToTarget;
     }
 
-    private Path findPathSpyglassAStar() {
-        return null;
+    private Path findPathSpyglassAStarHead() {
+        int[][] pathLengths = Utils.createMatrix(EnvironmentMap.getSize().x, EnvironmentMap.getSize().y, -1);
+
+        Position jackPosition = environmentMap.getJackPosition();
+        Position chestPosition = environmentMap.getChestPosition();
+        Position tortugaPosition = environmentMap.getTortugaPosition();
+
+        findPathSpyglassAStarBody(jackPosition, chestPosition, pathLengths, false);
+
+        Path pathObtained = new Path();
+        if (pathLengths[chestPosition.x][chestPosition.y] != -1)
+            pathObtained = getPathAfterSearching(jackPosition, chestPosition, pathLengths);
+        else if (pathLengths[tortugaPosition.x][tortugaPosition.y] != -1) {
+            pathObtained = getPathAfterSearching(jackPosition, tortugaPosition, pathLengths);
+            pathLengths = Utils.createMatrix(EnvironmentMap.getSize().x, EnvironmentMap.getSize().y, -1);
+            findPathSpyglassAStarBody(tortugaPosition, chestPosition, pathLengths, true);
+            if (pathLengths[chestPosition.x][chestPosition.y] == -1)
+                return new Path();
+            pathObtained.extend(getPathAfterSearching(tortugaPosition, chestPosition, pathLengths));
+        }
+
+        return pathObtained;
+    }
+
+    private void findPathSpyglassAStarBody(Position from, Position to, int[][] pathLengths, boolean rumPicked) {
+        BinaryHeap heap = new BinaryHeap();
+        pathLengths[from.x][from.y] = 0;
+
+        Path currentPath = new Path();
+        currentPath.addPosition(from);
+
+        Path updatedPath;
+
+        Position currentPosition;
+        heap.insertElement(0, currentPath);
+
+        int totalCost;
+
+        while (!heap.isEmpty()) {
+            currentPath = heap.extractMin();
+            currentPosition = currentPath.getLastPosition();
+            if (currentPosition.equals(to))
+                break;
+
+            if (!currentPath.isKrakenKilled()) {
+                for (int i = currentPosition.x - 1; i <= currentPosition.x + 1; ++i) {
+                    for (int j = currentPosition.y - 1; j <= currentPosition.y + 1; ++j) {
+                        if (i == currentPosition.x && j == currentPosition.y)
+                            continue;
+
+                        if (!EnvironmentMap.isOnMap(i, j))
+                            continue;
+
+                        if (rumPicked && environmentMap.isKrakenPosition(new Position(i, j)))
+                            currentPath.setKrakenKilled(true);
+                    }
+                }
+            }
+
+            for (int i = currentPosition.x - 1; i <= currentPosition.x + 1; ++i) {
+                for (int j = currentPosition.y - 1; j <= currentPosition.y + 1; ++j) {
+                    updatedPath = new Path(currentPath);
+                    updatedPath.addPosition(new Position(i, j));
+
+                    if (i == currentPosition.x && j == currentPosition.y)
+                        continue;
+
+                    if (!EnvironmentMap.isOnMap(i, j))
+                        continue;
+
+                    if (pathLengths[i][j] != -1)
+                        continue;
+
+                    if (environmentMap.isDanger(i, j, updatedPath.isKrakenKilled()))
+                        continue;
+
+                    pathLengths[i][j] = pathLengths[currentPosition.x][currentPosition.y] + 1;
+                    totalCost = pathLengths[i][j] + Utils.getHeuristicDistance(updatedPath.getLastPosition(), to);
+
+                    heap.insertElement(totalCost, updatedPath);
+                }
+            }
+        }
     }
 
     private Path findPathSuperSpyglass() {
-        return findPathSpyglass();
+        return null;
     }
 
     private Path findPathSuperSpyglassBacktrack() {
@@ -254,9 +263,8 @@ class Decider {
 }
 
 
-class Map {
-    private final List<List<Entity>> map;
-    private static final Vector<Integer> size = new Vector<>(9, 9);
+class EnvironmentMap {
+    private static final Position size = new Position(9, 9);
     private List<Entity> entities;
     private final List<Attacker> attackers;
     private JackSparrow jack;
@@ -265,21 +273,36 @@ class Map {
     private Kraken kraken;
     private Scenarios scenario;
 
-    private Map() {
-        map = new ArrayList<>(size.x);
-        List<Entity> line;
-        for (int i = 0; i < size.y; ++i) {
-            line = new ArrayList<>(size.y);
-            for (int j = 0; j < size.x; ++j)
-                line.add(null);
-
-            map.add(line);
-        }
+    private EnvironmentMap() {
         entities = new ArrayList<>();
         attackers = new ArrayList<>();
     }
 
-    public Map(boolean readFromFile) throws WrongInputException {
+    public EnvironmentMap(Position jackPosition, Position davyPosition, Position krakenPosition, Position rockPosition, Position chestPosition, Position tortugaPosition, Scenarios scenario) {
+        this();
+
+        jack = new JackSparrow(jackPosition);
+        DavyJones davy = new DavyJones(davyPosition);
+        kraken = new Kraken(krakenPosition);
+        Rock rock = new Rock(rockPosition);
+        chest = new DeadMansChest(chestPosition);
+        tortuga = new Tortuga(tortugaPosition);
+
+        entities = new ArrayList<>(List.of(
+                jack,
+                davy,
+                kraken,
+                rock,
+                chest,
+                tortuga
+        ));
+
+        attackers.addAll(List.of(davy, kraken, rock));
+
+        this.scenario = scenario;
+    }
+
+    public EnvironmentMap(boolean readFromFile) throws WrongInputException {
         this();
         if (readFromFile)
             readDataFromFile("input.txt");
@@ -350,7 +373,6 @@ class Map {
         String[] splitted;
         int x, y;
         for (int i = 0; i < splittedRow.length; ++i) {
-            System.out.println(splittedRow[i]);
             splitted = splittedRow[i].split(",");
 
             x = Integer.parseInt(splitted[0]);
@@ -359,9 +381,7 @@ class Map {
             if (!isOnMap(x, y))
                 throw new WrongInputException();
 
-            entities.get(i).setPosition(new Vector<>(x, y));
-
-            setCell(x, y, entities.get(i));
+            entities.get(i).setPosition(new Position(x, y));
         }
 
         int scenarioNumber = Integer.parseInt(secondLine);
@@ -375,32 +395,8 @@ class Map {
         }
     }
 
-    public static Vector<Integer> getSize() {
+    public static Position getSize() {
         return size;
-    }
-
-    public Entity getCell(int x, int y) {
-        if (!isOnMap(x, y))
-            return null;
-
-        return map.get(x).get(y);
-    }
-
-    public Entity getCell(Vector<Integer> vector) {
-        return getCell(vector.x, vector.y);
-    }
-
-    public void setCell(int x, int y, Entity entity) {
-        if (!isOnMap(x, y))
-            return;
-
-        map.get(x).set(y, entity);
-        entity.setX(x);
-        entity.setY(y);
-    }
-
-    public void setCell(Vector<Integer> vector, Entity entity) {
-        setCell(vector.x, vector.y, entity);
     }
 
     public boolean isDanger(int x, int y, boolean krakenKilled) {
@@ -410,245 +406,153 @@ class Map {
         return false;
     }
 
-    public boolean isDanger(Vector<Integer> position, boolean rumPicked) {
+    public boolean isDanger(Position position, boolean rumPicked) {
         return isDanger(position.x, position.y, rumPicked);
     }
 
-    public Vector<Integer> getChestPosition() {
+    public Position getChestPosition() {
         return chest.getPosition();
     }
 
-    public boolean isKrakenPosition(Vector<Integer> position) {
+    public boolean isKrakenPosition(Position position) {
         return position.equals(kraken.getPosition());
     }
 
-    public boolean isChestPosition(int x, int y) {
-        return chest.getX() == x && chest.getY() == y;
-    }
-
-    public boolean isChestPosition(Vector<Integer> position) {
-        return chest.getPosition().equals(position);
-    }
-
-    public Vector<Integer> getTortugaPosition() {
+    public Position getTortugaPosition() {
         return tortuga.getPosition();
     }
 
-    public boolean isTortugaPosition(int x, int y) {
-        return tortuga.getX() == x && tortuga.getY() == y;
-    }
-
-    public boolean isTortugaPosition(Vector<Integer> position) {
-        return tortuga.getPosition().equals(position);
-    }
-
-    public Vector<Integer> getJackPosition() {
+    public Position getJackPosition() {
         return jack.getPosition();
     }
 
-    public void print() {
-        Entity currentCell;
+    public String getString() {
+        return getString(new Path());
+    }
 
+    public String getString(Path path) {
+        Entity entityToPrint;
+        boolean positionToPrint;
+        StringBuilder result = new StringBuilder();
         for (int i = 0; i < size.y; ++i) {
             for (int j = 0; j < size.x; ++j) {
-                currentCell = getCell(j, i);
-
-                if (currentCell instanceof JackSparrow)
-                    System.out.print('J');
-                else if (currentCell instanceof DavyJones)
-                    System.out.print('D');
-                else if (currentCell instanceof Kraken)
-                    System.out.print('K');
-                else if (currentCell instanceof Rock)
-                    System.out.print('R');
-                else if (currentCell instanceof DeadMansChest)
-                    System.out.print('X');
-                else if (currentCell instanceof Tortuga)
-                    System.out.print('T');
-                else if (isDanger(j, i, false))
-                    System.out.print('#');
+                Position finalCurrentPosition = new Position(j, i);
+                entityToPrint = entities.stream().filter(entity -> entity.isOnPosition(finalCurrentPosition)).findFirst().orElse(null);
+                positionToPrint = path.getPositions().stream().anyMatch(position -> position.equals(finalCurrentPosition));
+                if (entityToPrint != null)
+                    result.append(entityToPrint);
+                else if (positionToPrint)
+                    result.append('*');
                 else
-                    System.out.print('_');
+                    result.append('_');
             }
-
-            System.out.print('\n');
+            result.append('\n');
         }
+        return result.toString();
+    }
+
+    public Scenarios getScenario() {
+        return scenario;
     }
 
     public static boolean isOnMap(int x, int y) {
         return x >= 0 && x < size.x && y >= 0 && y < size.y;
     }
 
-    public static boolean isOnMap(Vector<Integer> vector) {
-        return isOnMap(vector.x, vector.y);
+    public static boolean isOnMap(Position position) {
+        return isOnMap(position.x, position.y);
     }
 }
 
 
-interface Entity {
-    public int getX();
+abstract class Entity {
+    protected Position position;
 
-    public void setX(int x);
+    public Entity() {
+        this.position = new Position();
+    }
 
-    public int getY();
+    public Entity(Position position) {
+        this.position = position;
+    }
 
-    public void setY(int y);
+    public Position getPosition() {
+        return position;
+    }
 
-    public Vector<Integer> getPosition();
+    public void setPosition(Position position) {
+        this.position = position;
+    }
 
-    public void setPosition(Vector<Integer> position);
+    public boolean isOnPosition(Position position) {
+        return this.position.equals(position);
+    }
+
+    @Override
+    public abstract String toString();
 }
 
 interface Attacker {
-    public List<Vector<Integer>> getAttackRange();
-    public boolean isAttacking(int x, int y);
-    public boolean canBeNeutralized(int x, int y);
-    public boolean isNeutralized();
-    public void neutralize();
+    boolean isAttacking(int x, int y);
 }
 
 
-class JackSparrow implements Entity {
-    private Vector<Integer> position;
-
+class JackSparrow extends Entity {
     public JackSparrow() {
-        position = new Vector<>();
+        super();
     }
 
-    public int getX() {
-        return position.x;
+    public JackSparrow(Position jackPosition) {
+        super(jackPosition);
     }
 
-    public void setX(int x) {
-        this.position.x = x;
-    }
-
-    public int getY() {
-        return this.position.y;
-    }
-
-    public void setY(int y) {
-        this.position.y = y;
-    }
-
-    public Vector<Integer> getPosition() {
-        return position;
-    }
-
-    public void setPosition(Vector<Integer> position) {
-        this.position = position;
+    @Override
+    public String toString() {
+        return "J";
     }
 }
 
 
-class DavyJones implements Entity, Attacker {
-    private Vector<Integer> position;
-
+class DavyJones extends Entity implements Attacker {
     public DavyJones() {
-        position = new Vector<>();
+        super();
     }
 
-    public int getX() {
-        return position.x;
+    public DavyJones(Position position) {
+        super(position);
     }
 
-    public void setX(int x) {
-        this.position.x = x;
-    }
-
-    public int getY() {
-        return this.position.y;
-    }
-
-    public void setY(int y) {
-        this.position.y = y;
-    }
-
-    public Vector<Integer> getPosition() {
-        return position;
-    }
-
-    public void setPosition(Vector<Integer> position) {
-        this.position = position;
-    }
-
-    public List<Vector<Integer>> getAttackRange() {
-        List<Vector<Integer>> attackRange = new ArrayList<>(8);
+    public List<Position> getAttackRange() {
+        List<Position> attackRange = new ArrayList<>(8);
         for (int i = position.x - 1; i <= position.x + 1; ++i) {
             for (int j = position.y - 1; j <= position.y + 1; ++j)
-                attackRange.add(new Vector<>(i, j));
+                attackRange.add(new Position(i, j));
         }
         return attackRange;
     }
 
     @Override
     public boolean isAttacking(int x, int y) {
-        for (Vector<Integer> position : getAttackRange())
+        for (Position position : getAttackRange())
             if (position.x == x && position.y == y)
                 return true;
         return false;
     }
 
-    public boolean canBeNeutralized(int x, int y) {
-        return false;
-    }
-
     @Override
-    public boolean isNeutralized() {
-        return false;
-    }
-
-    @Override
-    public void neutralize() {
-
+    public String toString() {
+        return "D";
     }
 }
 
 
-class Kraken implements Entity, Attacker {
-    private Vector<Integer> position;
-    private boolean isNeutralized = false;
-
+class Kraken extends Entity implements Attacker {
     public Kraken() {
-        position = new Vector<>();
+        super();
     }
 
-    public int getX() {
-        return position.x;
-    }
-
-    public void setX(int x) {
-        this.position.x = x;
-    }
-
-    public int getY() {
-        return this.position.y;
-    }
-
-    public void setY(int y) {
-        this.position.y = y;
-    }
-
-    public Vector<Integer> getPosition() {
-        return position;
-    }
-
-    public void setPosition(Vector<Integer> position) {
-        this.position = position;
-    }
-
-    @Override
-    public List<Vector<Integer>> getAttackRange() {
-        if (isNeutralized)
-            return new ArrayList<>();
-        else
-            return new ArrayList<>(List.of(
-                    new Vector<>(position.x, position.y),
-                    new Vector<>(position.x - 1, position.y),
-                    new Vector<>(position.x + 1, position.y),
-                    new Vector<>(position.x, position.y - 1),
-                    new Vector<>(position.x, position.y + 1)
-            ));
+    public Kraken(Position position) {
+        super(position);
     }
 
     @Override
@@ -657,56 +561,20 @@ class Kraken implements Entity, Attacker {
                 || Math.abs(y - position.y) <= 1 && x == position.x;
     }
 
-    public boolean canBeNeutralized(int x, int y) {
-        return (position.y - 1 == y || position.y + 1 == y) && (position.x - 1 == x || position.x + 1 == x);
-    }
-
     @Override
-    public boolean isNeutralized() {
-        return isNeutralized;
-    }
-
-    @Override
-    public void neutralize() {
-        isNeutralized = true;
+    public String toString() {
+        return "K";
     }
 }
 
 
-class Rock implements Entity, Attacker {
-    private Vector<Integer> position;
-
+class Rock extends Entity implements Attacker {
     public Rock() {
-        position = new Vector<>();
+        super();
     }
 
-    public int getX() {
-        return position.x;
-    }
-
-    public void setX(int x) {
-        this.position.x = x;
-    }
-
-    public int getY() {
-        return this.position.y;
-    }
-
-    public void setY(int y) {
-        this.position.y = y;
-    }
-
-    public Vector<Integer> getPosition() {
-        return position;
-    }
-
-    public void setPosition(Vector<Integer> position) {
-        this.position = position;
-    }
-
-    @Override
-    public List<Vector<Integer>> getAttackRange() {
-        return new ArrayList<>(List.of(position));
+    public Rock(Position position) {
+        super(position);
     }
 
     @Override
@@ -714,85 +582,41 @@ class Rock implements Entity, Attacker {
         return position.x == x && position.y == y;
     }
 
-
-    public boolean canBeNeutralized(int x, int y) {
-        return false;
-    }
-
     @Override
-    public boolean isNeutralized() {
-        return false;
-    }
-
-    @Override
-    public void neutralize() {
-
+    public String toString() {
+        return "R";
     }
 }
 
 
-class DeadMansChest implements Entity {
-    private Vector<Integer> position;
-
+class DeadMansChest extends Entity {
     public DeadMansChest() {
-        position = new Vector<>();
+        super();
     }
 
-    public int getX() {
-        return position.x;
+    public DeadMansChest(Position position) {
+        super(position);
     }
 
-    public void setX(int x) {
-        this.position.x = x;
-    }
-
-    public int getY() {
-        return this.position.y;
-    }
-
-    public void setY(int y) {
-        this.position.y = y;
-    }
-
-    public Vector<Integer> getPosition() {
-        return position;
-    }
-
-    public void setPosition(Vector<Integer> position) {
-        this.position = position;
+    @Override
+    public String toString() {
+        return "X";
     }
 }
 
 
-class Tortuga implements Entity {
-    private Vector<Integer> position;
-
+class Tortuga extends Entity {
     public Tortuga() {
-        position = new Vector<>();
+        super();
     }
 
-    public int getX() {
-        return position.x;
+    public Tortuga(Position position) {
+        super(position);
     }
 
-    public void setX(int x) {
-        this.position.x = x;
-    }
-
-    public int getY() {
-        return this.position.y;
-    }
-
-    public void setY(int y) {
-        this.position.y = y;
-    }
-
-    public Vector<Integer> getPosition() {
-        return position;
-    }
-
-    public void setPosition(Vector<Integer> position) {
-        this.position = position;
+    @Override
+    public String toString() {
+        return "T";
     }
 }
 
@@ -815,6 +639,186 @@ class Utils {
             System.out.println();
         }
         System.out.println();
+    }
+
+    public static int getHeuristicDistance(Position from, Position to) {
+        return Math.max(Math.abs(from.x - to.x), Math.abs(from.y - to.y));
+    }
+}
+
+
+
+class Position {
+    /*
+     * Defines a container for two values
+     * Used in code to store positions of entities on a map
+     * The fields x and y are public and have no getters and setters, because it is sufficient for just storing some values
+     * */
+    public Integer x;
+    public Integer y;
+
+    public Position() {
+
+    }
+
+    public Position(Integer x, Integer y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (obj instanceof Position)
+            return ((Position) obj).x.equals(x) && ((Position) obj).y.equals(y);
+        else
+            return false;
+    }
+
+    @Override
+    public String toString() {
+        return "(" + x + ", " + y + ")";
+    }
+}
+
+
+class Path {
+    private final List<Position> positions;
+    private final boolean rumPicked;
+    private boolean krakenKilled;
+
+    public Path() {
+        positions = new ArrayList<>();
+        rumPicked = false;
+        krakenKilled = false;
+    }
+
+    public Path(Path oldPath) {
+        positions = new ArrayList<>(oldPath.getPositions());
+        rumPicked = oldPath.isRumPicked();
+        krakenKilled = oldPath.isKrakenKilled();
+    }
+
+    public List<Position> getPositions() {
+        return positions;
+    }
+
+    public void addPosition(Position position) {
+        positions.add(position);
+    }
+
+    public void addPositionToBeginning(Position position) {
+        positions.add(0, position);
+    }
+
+    public void extend(Path otherPath) {
+        for (Position position : otherPath.positions)
+            addPosition(position);
+    }
+
+    public boolean isRumPicked() {
+        return rumPicked;
+    }
+
+    public boolean isKrakenKilled() {
+        return krakenKilled;
+    }
+
+    public void setKrakenKilled(boolean killed) {
+        krakenKilled = killed;
+    }
+
+    public int size() {
+        return positions.size();
+    }
+
+    public Position getLastPosition() {
+        return positions.get(positions.size() - 1);
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder res = new StringBuilder();
+        for (Position pos : positions)
+            res.append(pos.toString());
+        return res.toString();
+    }
+}
+
+
+
+class BinaryHeap {
+    List<Integer> keys;
+    List<Path> values;
+
+    BinaryHeap() {
+        keys = new ArrayList<>();
+        values = new ArrayList<>();
+    }
+
+    private int getParentIndex(int i) {
+        return i / 2;
+    }
+
+    private int getLeftChildIndex(int i) {
+        return i * 2 + 1;
+    }
+
+    private int getRightChildIndex(int i) {
+        return (i + 1) * 2;
+    }
+
+    private void heapify(int i) {
+        int left = getLeftChildIndex(i);
+        int right = getRightChildIndex(i);
+
+        int min = i;
+
+        if (left < keys.size() && keys.get(left) < keys.get(i))
+            min = left;
+        if (right < keys.size() && keys.get(right) < keys.get(min))
+            min = right;
+
+        if (min != i) {
+            swapElements(keys, i, min);
+            swapElements(values, i, min);
+            heapify(min);
+        }
+    }
+
+    public Path extractMin() {
+        Path min = values.get(0);
+        keys.set(0, keys.get(keys.size() - 1));
+        keys.remove(keys.size() - 1);
+        values.set(0, values.get(values.size() - 1));
+        values.remove(values.size() - 1);
+        heapify(0);
+        return min;
+    }
+
+    private void increaseKey(int index, Integer key, Path value) {
+        keys.set(index, key);
+        values.set(index, value);
+        while (index > 0 && keys.get(getParentIndex(index)) > keys.get(index)) {
+            swapElements(keys, index, getParentIndex(index));
+            swapElements(values, index, getParentIndex(index));
+            index = getParentIndex(index);
+        }
+    }
+
+    public void insertElement(Integer key, Path value) {
+        keys.add(key);
+        values.add(value);
+        increaseKey(keys.size() - 1, key, value);
+    }
+
+    public boolean isEmpty() {
+        return keys.isEmpty();
+    }
+
+    private static <T> void swapElements(List<T> list, int firstIndex, int secondIndex) {
+        T temp = list.get(firstIndex);
+        list.set(firstIndex, list.get(secondIndex));
+        list.set(secondIndex, temp);
     }
 }
 
