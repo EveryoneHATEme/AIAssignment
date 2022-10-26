@@ -346,6 +346,8 @@ class Decider {
         if (pathLengths[chestPosition.x][chestPosition.y] != -1)
             pathObtained = getPathAfterSearching(jackPosition, chestPosition, pathLengths);
         else if (pathLengths[tortugaPosition.x][tortugaPosition.y] != -1) {
+            pathLengths = Utils.createMatrix(EnvironmentMap.getSize().x, EnvironmentMap.getSize().y, -1);
+            findPathSpyglassAStarBody(jackPosition, tortugaPosition, pathLengths, false);
             pathObtained = getPathAfterSearching(jackPosition, tortugaPosition, pathLengths);
             pathLengths = Utils.createMatrix(EnvironmentMap.getSize().x, EnvironmentMap.getSize().y, -1);
             findPathSpyglassAStarBody(tortugaPosition, chestPosition, pathLengths, true);
