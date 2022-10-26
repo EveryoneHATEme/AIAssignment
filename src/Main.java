@@ -5,9 +5,10 @@ import java.util.stream.Collectors;
 
 public class Main {
     public static void main(String[] args) throws WrongInputException {
-        EnvironmentMap map = new EnvironmentMap(true);
-        Decider decider = new Decider(map);
-        decider.findPath(true);
+//        EnvironmentMap map = new EnvironmentMap(true);
+//        Decider decider = new Decider(map);
+//        decider.findPath(true);
+        new Tester(1000).runTests();
     }
 }
 
@@ -40,15 +41,15 @@ class Tester {
 
             do
                 davyPosition = Position.getRandomPosition(EnvironmentMap.getSize().x, EnvironmentMap.getSize().y);
-            while (!davyPosition.equals(jackPosition));
+            while (davyPosition.equals(jackPosition));
 
             do
                 krakenPosition = Position.getRandomPosition(EnvironmentMap.getSize().x, EnvironmentMap.getSize().y);
-            while (!krakenPosition.equals(jackPosition) && !krakenPosition.equals(davyPosition));
+            while (krakenPosition.equals(jackPosition) || krakenPosition.equals(davyPosition));
 
             do
                 rockPosition = Position.getRandomPosition(EnvironmentMap.getSize().x, EnvironmentMap.getSize().y);
-            while (!rockPosition.equals(jackPosition) && !rockPosition.equals(davyPosition));
+            while (rockPosition.equals(jackPosition) || rockPosition.equals(davyPosition));
 
             davyInstance = new DavyJones(davyPosition);
             krakenInstance = new Kraken(krakenPosition);
@@ -61,7 +62,7 @@ class Tester {
                 isInsideRock = rockPosition.equals(chestPosition);
                 underDavyAttack = davyInstance.isAttacking(chestPosition.x, chestPosition.y);
                 underKrakenAttack = krakenInstance.isAttacking(chestPosition.x, chestPosition.y);
-            } while (!(isInsideJack || isInsideDavy || isInsideKraken || isInsideRock || underDavyAttack || underKrakenAttack));
+            } while (isInsideJack || isInsideDavy || isInsideKraken || isInsideRock || underDavyAttack || underKrakenAttack);
 
             do {
                 tortugaPosition = Position.getRandomPosition(EnvironmentMap.getSize().x, EnvironmentMap.getSize().y);
@@ -71,7 +72,7 @@ class Tester {
                 isInsideChest = chestPosition.equals(tortugaPosition);
                 underDavyAttack = davyInstance.isAttacking(tortugaPosition.x, tortugaPosition.y);
                 underKrakenAttack = krakenInstance.isAttacking(tortugaPosition.x, tortugaPosition.y);
-            } while (!(isInsideDavy || isInsideKraken || isInsideRock || isInsideChest || underDavyAttack || underKrakenAttack));
+            } while (isInsideDavy || isInsideKraken || isInsideRock || isInsideChest || underDavyAttack || underKrakenAttack);
 
             EnvironmentMap map = new EnvironmentMap(jackPosition, davyPosition, krakenPosition, rockPosition, chestPosition, tortugaPosition, Scenarios.SPYGLASS);
             Decider decider = new Decider(map);
@@ -97,6 +98,8 @@ class Tester {
         System.out.println("mode: " + mode);
         System.out.println("median: " + median);
         System.out.println("standard deviation: " + standardDeviation);
+        System.out.println("number of wins: " + numberOfWinsBacktracking);
+        System.out.println("number of loses: " + (testsAmount - numberOfWinsBacktracking));
 
         mean = Utils.getMean(executionTimesAStar);
         mode = Utils.getMode(executionTimesAStar);
@@ -108,6 +111,8 @@ class Tester {
         System.out.println("mode: " + mode);
         System.out.println("median: " + median);
         System.out.println("standard deviation: " + standardDeviation);
+        System.out.println("number of wins: " + numberOfWinsAStar);
+        System.out.println("number of loses: " + (testsAmount - numberOfWinsAStar));
     }
 }
 
